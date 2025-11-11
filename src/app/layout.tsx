@@ -15,8 +15,8 @@ export default function RootLayout({
 }>) {
   return (
     <App>
-      <NavBar/>
-        {children}
+      <NavBar />
+      {children}
     </App>
   );
 }
