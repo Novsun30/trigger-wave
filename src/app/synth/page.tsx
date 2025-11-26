@@ -1,123 +1,126 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import * as Tone from "tone";
 
-let osc: null | Tone.Oscillator = null;
-
-interface adsr {
-  attack: number;
-  decay: number;
-  sustain: number;
-  release: number;
-}
-interface lfo {
-  hertz: number;
-  min: number;
-  max: number;
-}
-
-const createSound = (oscInputType: OscillatorType, adsr: adsr, lfo: lfo) => {
-  const env = new Tone.AmplitudeEnvelope(adsr);
-  osc = new Tone.Oscillator(440, oscInputType);
-
-  const volume = new Tone.Volume().toDestination();
-  // const lfo = new Tone.LFO(0.5, 0, 40).start();
-  // lfo.connect(volume.volume);
-
-  const lfo2 = new Tone.LFO(lfo.hertz, lfo.min, lfo.max).start();
-  lfo2.connect(osc.frequency);
-
-  osc.connect(env);
-  env.connect(volume);
-
-  osc.volume.value = -16;
-  osc.start();
-  env.triggerAttackRelease("2.5");
-};
+const BASIC_HERTZ = 440;
 
 export default function Synth() {
-  const [oscType, setOscType] = useState<OscillatorType>("sine");
-  const [adsrValue, setAdsrValue] = useState({
-    attack: 1.4,
-    decay: 0.8,
+  const oscRef = useRef<Tone.Oscillator | null>(null);
+  const volumeRef = useRef<Tone.Volume | null>(null);
+  const envelopRef = useRef<Tone.AmplitudeEnvelope | null>(null);
+  const lfoRef = useRef<Tone.LFO | null>(null);
+  const [volume, setVolume] = useState(-10);
+  const [adsr, setAdsr] = useState({
+    attack: 0.01,
+    decay: 0.01,
     sustain: 1,
-    release: 0.8,
+    release: 0.01,
   });
-  const [lfoValue, setLfoValue] = useState({
-    hertz: 5,
-    min: 220,
-    max: 440,
-  });
+  const [lfoAmount, setLfoAmount] = useState(0.1);
+  const [lfo, setLfo] = useState(5);
 
-  const start = () => {
-    if (osc === null) {
-      createSound(oscType, adsrValue, lfoValue);
+  useEffect(() => {
+    oscRef.current = new Tone.Oscillator(BASIC_HERTZ, "sine");
+    envelopRef.current = new Tone.AmplitudeEnvelope();
+    lfoRef.current = new Tone.LFO().start();
+    lfoRef.current.connect(oscRef.current.frequency);
+    volumeRef.current = new Tone.Volume().toDestination();
+    oscRef.current.chain(envelopRef.current, volumeRef.current);
+    oscRef.current?.start();
+  }, []);
+
+  useEffect(() => {
+    if (!oscRef.current || !volumeRef.current || !envelopRef.current) {
       return;
     }
-    osc.stop();
-    createSound(oscType, adsrValue, lfoValue);
+    lfoRef.current?.set({
+      min: BASIC_HERTZ - (880 * lfoAmount) / 100,
+      max: BASIC_HERTZ + (880 * lfoAmount) / 100,
+      frequency: lfo,
+    });
+    volumeRef.current.volume.value = volume;
+    envelopRef.current.set({
+      attack: adsr.attack,
+      decay: adsr.decay,
+      sustain: adsr.sustain,
+      release: adsr.release,
+    });
+  }, [volume, adsr, lfo, lfoAmount]);
+
+  const handleMouseDown = () => {
+    envelopRef.current?.triggerAttack();
   };
-
-  const stop = () => {
-    if (osc === null) {
-      return;
-    }
-    osc.stop();
+  const handleMouseUp = () => {
+    envelopRef.current?.triggerRelease();
   };
 
   const adsrArray = [
     {
       type: "attack",
-      value: adsrValue.attack,
+      value: adsr.attack,
     },
     {
       type: "decay",
-      value: adsrValue.decay,
+      value: adsr.decay,
     },
     {
       type: "sustain",
-      value: adsrValue.sustain,
+      value: adsr.sustain,
     },
     {
       type: "release",
-      value: adsrValue.release,
+      value: adsr.release,
     },
   ];
   const renderAdsr = adsrArray.map((item) => {
     return (
-      <div key={item.type}>
-        {item.type}
+      <div key={item.type} className="flex flex-col">
+        {item.type} {item.value === 0.01 ? 0 : item.value}
         <input
           value={item.value}
+          min={item.type === "sustain" ? 0 : 0.01}
+          max={item.type === "sustain" ? 1 : 2}
+          step={0.01}
+          onMouseDown={handleMouseDown}
+          onMouseUp={handleMouseUp}
           onChange={(e) => {
-            setAdsrValue({ ...adsrValue, [item.type]: Number(e.target.value) });
+            setAdsr({ ...adsr, [item.type]: Number(e.target.value) });
+            envelopRef.current?.triggerAttack();
           }}
-          type="number"
+          type="range"
         />
       </div>
     );
   });
 
   const lfoArray = [
-    { type: "hertz", value: lfoValue.hertz },
+    { type: "hertz", value: lfo },
     {
-      type: "min",
-      value: lfoValue.min,
+      type: "amount",
+      value: lfoAmount,
     },
-    { type: "max", value: lfoValue.max },
   ];
 
   const renderLfo = lfoArray.map((item) => {
     return (
-      <div key={item.type}>
-        {item.type}
+      <div key={item.type} className="flex flex-col">
+        {item.type} {item.value}
         <input
           value={item.value}
+          min={item.type === "amount" ? 0 : 0.1}
+          max={item.type === "amount" ? 100 : 10}
+          step={item.type === "amount" ? 1 : 0.1}
+          onMouseDown={handleMouseDown}
+          onMouseUp={handleMouseUp}
           onChange={(e) => {
-            setLfoValue({ ...lfoValue, [item.type]: Number(e.target.value) });
+            if (item.type === "amount") {
+              setLfoAmount(Number(e.target.value));
+              return;
+            }
+            setLfo(Number(e.target.value));
           }}
-          type="number"
+          type="range"
         />
       </div>
     );
@@ -126,17 +129,30 @@ export default function Synth() {
   return (
     <div className="flex min-h-screen w-full flex-col items-center">
       <div className="flex gap-4">
-        <div onClick={stop}>stop</div>
-        <div onClick={start}>start</div>
+        <div onMouseDown={handleMouseDown} onMouseUp={handleMouseUp}>
+          start
+        </div>
+        <input
+          type="range"
+          max={0}
+          min={-60}
+          value={volume}
+          onMouseDown={handleMouseDown}
+          onMouseUp={handleMouseUp}
+          onChange={(e) => {
+            setVolume(Number(e.target.value));
+          }}
+        ></input>
+        <p className="w-16">{volume} db</p>
       </div>
       <div className="flex justify-around gap-4">
         <select
-          value={oscType}
+          defaultValue={"sine"}
           onChange={(e) => {
-            if (osc !== null) {
-              osc.stop();
+            if (oscRef.current === null) {
+              return;
             }
-            setOscType(e.target.value as OscillatorType);
+            oscRef.current.type = e.target.value as Tone.ToneOscillatorType;
           }}
         >
           <option value="sine">sine</option>
