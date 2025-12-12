@@ -7,7 +7,26 @@ import WaveformAnalyser from "./components/wavformAnalyser";
 
 const BASIC_HERTZ = 440;
 
+const KEY_MAP: { [key: string]: string } = {
+  KeyA: "C4",
+  KeyS: "D4",
+  KeyD: "E4",
+  KeyF: "F4",
+  KeyG: "G4",
+  KeyH: "A4",
+  KeyJ: "B4",
+  KeyK: "C5",
+};
+
+interface Voice {
+  osc: Tone.Oscillator;
+  env: Tone.AmplitudeEnvelope;
+}
+
 export default function Synth() {
+  const voiceRef = useRef<Map<string, Voice>>(new Map());
+  const keyMapRef = useRef<Map<string, HTMLElement>>(new Map());
+
   const oscRef = useRef<Tone.Oscillator | null>(null);
   const volumeRef = useRef<Tone.Volume | null>(null);
   const envelopRef = useRef<Tone.AmplitudeEnvelope | null>(null);
@@ -22,12 +41,15 @@ export default function Synth() {
     sustain: 1,
     release: 0.01,
   });
-  const [lfoAmount, setLfoAmount] = useState(0.1);
-  const [lfo, setLfo] = useState(5);
+  const adsrValueRef = useRef(adsr);
+  const [lfoAmount, setLfoAmount] = useState(0);
+  const [lfoFrequency, setLfoFrequency] = useState(5);
+  const lfoValueRef = useRef({ lfoFrequency, lfoAmount });
 
   useEffect(() => {
     oscRef.current = new Tone.Oscillator(BASIC_HERTZ, "sine");
     envelopRef.current = new Tone.AmplitudeEnvelope();
+
     lfoRef.current = new Tone.LFO().start();
     lfoRef.current.connect(oscRef.current.frequency);
     volumeRef.current = new Tone.Volume();
@@ -39,6 +61,7 @@ export default function Synth() {
       analyserFftRef.current,
       analyserWaveformRef.current,
     );
+
     oscRef.current?.start();
 
     function updateInitState() {
@@ -46,6 +69,62 @@ export default function Synth() {
     }
 
     updateInitState();
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.repeat) return;
+      const key = e.code;
+      const note = KEY_MAP[key];
+      if (voiceRef.current.has(note)) {
+        const voice = voiceRef.current.get(note);
+        voice?.env.dispose();
+      }
+      if (
+        note &&
+        oscRef.current &&
+        volumeRef.current &&
+        analyserFftRef.current &&
+        analyserWaveformRef.current
+      ) {
+        const osc = new Tone.Oscillator(note, oscRef.current.type);
+        const env = new Tone.AmplitudeEnvelope({
+          attack: adsrValueRef.current.attack,
+          decay: adsrValueRef.current.decay,
+          sustain: adsrValueRef.current.sustain,
+          release: adsrValueRef.current.release,
+        });
+
+        const lfoMod = new Tone.LFO(
+          lfoValueRef.current.lfoFrequency,
+          Tone.Frequency(note).toFrequency() -
+            (880 * lfoValueRef.current.lfoAmount) / 100,
+          Tone.Frequency(note).toFrequency() +
+            (880 * lfoValueRef.current.lfoAmount) / 100,
+        ).start();
+        lfoMod.connect(osc.frequency);
+        osc.chain(
+          env,
+          volumeRef.current,
+          analyserFftRef.current,
+          analyserWaveformRef.current,
+        );
+        voiceRef.current.set(note, { osc, env });
+        osc.start();
+        env.triggerAttack();
+      }
+    };
+
+    const handleKeyUp = (e: KeyboardEvent) => {
+      const key = e.code;
+      const note = KEY_MAP[key];
+      if (note) {
+        const voice = voiceRef.current.get(note);
+        voice?.env.triggerRelease();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("keyup", handleKeyUp);
+
     return () => {
       oscRef.current?.dispose();
       envelopRef.current?.dispose();
@@ -63,7 +142,7 @@ export default function Synth() {
     lfoRef.current?.set({
       min: BASIC_HERTZ - (880 * lfoAmount) / 100,
       max: BASIC_HERTZ + (880 * lfoAmount) / 100,
-      frequency: lfo,
+      frequency: lfoFrequency,
     });
     volumeRef.current.volume.value = volume;
     envelopRef.current.set({
@@ -72,7 +151,9 @@ export default function Synth() {
       sustain: adsr.sustain,
       release: adsr.release,
     });
-  }, [volume, adsr, lfo, lfoAmount]);
+    adsrValueRef.current = adsr;
+    lfoValueRef.current = { lfoFrequency, lfoAmount };
+  }, [volume, adsr, lfoFrequency, lfoAmount]);
 
   const handleMouseDown = () => {
     envelopRef.current?.triggerAttack();
@@ -118,7 +199,7 @@ export default function Synth() {
   });
 
   const lfoArray = [
-    { type: "hertz", value: lfo },
+    { type: "hertz", value: lfoFrequency },
     {
       type: "amount",
       value: lfoAmount,
@@ -142,7 +223,7 @@ export default function Synth() {
               setLfoAmount(Number(e.target.value));
               return;
             }
-            setLfo(Number(e.target.value));
+            setLfoFrequency(Number(e.target.value));
           }}
           type="range"
         />
@@ -204,6 +285,26 @@ export default function Synth() {
         height={150}
         isInitialized={isInitialized}
       />
+
+      <div className="flex gap-2">
+        {Object.values(KEY_MAP).map((item) => {
+          return (
+            <div
+              key={item}
+              ref={(el) => {
+                if (el) {
+                  keyMapRef.current.set(item, el);
+                } else {
+                  keyMapRef.current?.delete(item);
+                }
+              }}
+            >
+              {item}
+            </div>
+          );
+        })}
+        {/* keyboard */}
+      </div>
     </div>
   );
 }
