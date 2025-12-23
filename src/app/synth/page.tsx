@@ -8,25 +8,31 @@ import WaveformAnalyser from "./components/wavformAnalyser";
 const BASIC_HERTZ = 440;
 
 const KEY_MAP: { [key: string]: string } = {
-  KeyA: "C4",
-  KeyS: "D4",
-  KeyD: "E4",
-  KeyF: "F4",
-  KeyG: "G4",
-  KeyH: "A4",
-  KeyJ: "B4",
-  KeyK: "C5",
+  KeyZ: "C4",
+  KeyS: "C#4",
+  KeyX: "D4",
+  KeyD: "D#4",
+  KeyC: "E4",
+  KeyV: "F4",
+  KeyG: "F#4",
+  KeyB: "G4",
+  KeyH: "G#4",
+  KeyN: "A4",
+  KeyJ: "A#4",
+  KeyM: "B4",
+  Comma: "C5",
 };
 
 interface Voice {
   osc: Tone.Oscillator;
   env: Tone.AmplitudeEnvelope;
+  volume: Tone.Volume;
 }
 
 export default function Synth() {
+  const isMouseDownRef = useRef(false);
   const voiceRef = useRef<Map<string, Voice>>(new Map());
   const keyMapRef = useRef<Map<string, HTMLElement>>(new Map());
-
   const oscRef = useRef<Tone.Oscillator | null>(null);
   const volumeRef = useRef<Tone.Volume | null>(null);
   const envelopRef = useRef<Tone.AmplitudeEnvelope | null>(null);
@@ -45,6 +51,47 @@ export default function Synth() {
   const [lfoAmount, setLfoAmount] = useState(0);
   const [lfoFrequency, setLfoFrequency] = useState(5);
   const lfoValueRef = useRef({ lfoFrequency, lfoAmount });
+
+  const creatSound = (note: string) => {
+    if (
+      oscRef.current === null ||
+      volumeRef.current === null ||
+      analyserFftRef.current === null ||
+      analyserWaveformRef.current === null
+    ) {
+      return;
+    }
+
+    const node = keyMapRef.current.get(note);
+    node?.classList.add("active-kb");
+    const osc = new Tone.Oscillator(note, oscRef.current.type);
+    const env = new Tone.AmplitudeEnvelope({
+      attack: adsrValueRef.current.attack,
+      decay: adsrValueRef.current.decay,
+      sustain: adsrValueRef.current.sustain,
+      release: adsrValueRef.current.release,
+    });
+    const volume = new Tone.Volume(volumeRef.current.volume.value);
+    const lfoMod = new Tone.LFO(
+      lfoValueRef.current.lfoFrequency,
+      Tone.Frequency(note).toFrequency() -
+        (440 * lfoValueRef.current.lfoAmount) / 100,
+      Tone.Frequency(note).toFrequency() +
+        (440 * lfoValueRef.current.lfoAmount) / 100,
+    ).start();
+    lfoMod.connect(osc.frequency);
+    osc.chain(env, volume, analyserFftRef.current, analyserWaveformRef.current);
+    voiceRef.current.set(note, { osc, env, volume });
+    osc.start();
+    env.triggerAttack();
+  };
+
+  const stopSound = (note: string) => {
+    const keyboardElement = keyMapRef.current.get(note);
+    keyboardElement?.classList.remove("active-kb");
+    const voice = voiceRef.current.get(note);
+    voice?.env.triggerRelease();
+  };
 
   useEffect(() => {
     oscRef.current = new Tone.Oscillator(BASIC_HERTZ, "sine");
@@ -78,50 +125,23 @@ export default function Synth() {
         const voice = voiceRef.current.get(note);
         voice?.env.dispose();
       }
-      if (
-        note &&
-        oscRef.current &&
-        volumeRef.current &&
-        analyserFftRef.current &&
-        analyserWaveformRef.current
-      ) {
-        const osc = new Tone.Oscillator(note, oscRef.current.type);
-        const env = new Tone.AmplitudeEnvelope({
-          attack: adsrValueRef.current.attack,
-          decay: adsrValueRef.current.decay,
-          sustain: adsrValueRef.current.sustain,
-          release: adsrValueRef.current.release,
-        });
-
-        const lfoMod = new Tone.LFO(
-          lfoValueRef.current.lfoFrequency,
-          Tone.Frequency(note).toFrequency() -
-            (880 * lfoValueRef.current.lfoAmount) / 100,
-          Tone.Frequency(note).toFrequency() +
-            (880 * lfoValueRef.current.lfoAmount) / 100,
-        ).start();
-        lfoMod.connect(osc.frequency);
-        osc.chain(
-          env,
-          volumeRef.current,
-          analyserFftRef.current,
-          analyserWaveformRef.current,
-        );
-        voiceRef.current.set(note, { osc, env });
-        osc.start();
-        env.triggerAttack();
-      }
+      creatSound(note);
     };
 
     const handleKeyUp = (e: KeyboardEvent) => {
       const key = e.code;
       const note = KEY_MAP[key];
       if (note) {
-        const voice = voiceRef.current.get(note);
-        voice?.env.triggerRelease();
+        stopSound(note);
       }
     };
 
+    window.addEventListener("mousedown", () => {
+      isMouseDownRef.current = true;
+    });
+    window.addEventListener("mouseup", () => {
+      isMouseDownRef.current = false;
+    });
     window.addEventListener("keydown", handleKeyDown);
     window.addEventListener("keyup", handleKeyUp);
 
@@ -154,13 +174,6 @@ export default function Synth() {
     adsrValueRef.current = adsr;
     lfoValueRef.current = { lfoFrequency, lfoAmount };
   }, [volume, adsr, lfoFrequency, lfoAmount]);
-
-  const handleMouseDown = () => {
-    envelopRef.current?.triggerAttack();
-  };
-  const handleMouseUp = () => {
-    envelopRef.current?.triggerRelease();
-  };
 
   const adsrArray = [
     {
@@ -215,9 +228,6 @@ export default function Synth() {
           min={item.type === "amount" ? 0 : 0.1}
           max={item.type === "amount" ? 100 : 10}
           step={item.type === "amount" ? 1 : 0.1}
-          onMouseDown={handleMouseDown}
-          onMouseUp={handleMouseUp}
-          onMouseLeave={handleMouseUp}
           onChange={(e) => {
             if (item.type === "amount") {
               setLfoAmount(Number(e.target.value));
@@ -234,21 +244,11 @@ export default function Synth() {
   return (
     <div className="flex min-h-screen w-full flex-col items-center">
       <div className="flex gap-4">
-        <div
-          onMouseDown={handleMouseDown}
-          onMouseUp={handleMouseUp}
-          onMouseLeave={handleMouseUp}
-        >
-          start
-        </div>
         <input
           type="range"
           max={0}
           min={-50}
           value={volume}
-          onMouseDown={handleMouseDown}
-          onMouseUp={handleMouseUp}
-          onMouseLeave={handleMouseUp}
           onChange={(e) => {
             setVolume(Number(e.target.value));
           }}
@@ -286,11 +286,21 @@ export default function Synth() {
         isInitialized={isInitialized}
       />
 
-      <div className="flex gap-2">
+      <div className="mt-16 flex">
         {Object.values(KEY_MAP).map((item) => {
           return (
             <div
+              className={
+                "flex h-20 w-16 items-center justify-center border border-blue-400 select-text" +
+                (/#/.test(item) ? " bg-black-700 -mx-8 -translate-y-20" : "")
+              }
               key={item}
+              onMouseDown={() => creatSound(item)}
+              onMouseEnter={() => {
+                if (isMouseDownRef.current) creatSound(item);
+              }}
+              onMouseLeave={() => stopSound(item)}
+              onMouseUp={() => stopSound(item)}
               ref={(el) => {
                 if (el) {
                   keyMapRef.current.set(item, el);
@@ -303,7 +313,6 @@ export default function Synth() {
             </div>
           );
         })}
-        {/* keyboard */}
       </div>
     </div>
   );
