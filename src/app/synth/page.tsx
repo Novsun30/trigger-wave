@@ -8,25 +8,27 @@ import WaveformAnalyser from "./components/wavformAnalyser";
 const BASIC_HERTZ = 440;
 
 const KEY_MAP: { [key: string]: string } = {
-  KeyZ: "C4",
-  KeyS: "C#4",
-  KeyX: "D4",
-  KeyD: "D#4",
-  KeyC: "E4",
-  KeyV: "F4",
-  KeyG: "F#4",
-  KeyB: "G4",
-  KeyH: "G#4",
-  KeyN: "A4",
-  KeyJ: "A#4",
-  KeyM: "B4",
-  Comma: "C5",
+  KeyA: "C4",
+  KeyW: "C#4",
+  KeyS: "D4",
+  KeyE: "D#4",
+  KeyD: "E4",
+  KeyF: "F4",
+  KeyT: "F#4",
+  KeyG: "G4",
+  KeyY: "G#4",
+  KeyH: "A4",
+  KeyU: "A#4",
+  KeyJ: "B4",
+  KeyK: "C5",
 };
 
 interface Voice {
   osc: Tone.Oscillator;
   env: Tone.AmplitudeEnvelope;
   volume: Tone.Volume;
+  lfo: Tone.LFO;
+  timeoutId?: NodeJS.Timeout;
 }
 
 export default function Synth() {
@@ -62,6 +64,42 @@ export default function Synth() {
       return;
     }
 
+    if (voiceRef.current.has(note)) {
+      const oldVoice = voiceRef.current.get(note);
+
+      if (oldVoice) {
+        // if (oldVoice.timeoutId) {
+        //   clearTimeout(oldVoice.timeoutId);
+        // }
+        const releaseDuration = Tone.Time(
+          adsrValueRef.current.release,
+        ).toSeconds();
+
+        const timeoutId = setTimeout(
+          () => {
+            if (oldVoice.osc.disposed) return;
+            oldVoice.osc.disconnect();
+            oldVoice.env.disconnect();
+            oldVoice.volume.disconnect();
+            oldVoice.lfo.disconnect();
+
+            oldVoice.osc.dispose();
+            oldVoice.env.dispose();
+            oldVoice.volume.dispose();
+            oldVoice.lfo.dispose();
+
+            const currentVoice = voiceRef.current.get(note);
+            if (currentVoice === oldVoice) {
+              voiceRef.current.delete(note);
+            }
+          },
+          releaseDuration * 1000 + 100,
+        );
+      }
+
+      voiceRef.current.delete(note);
+    }
+
     const node = keyMapRef.current.get(note);
     node?.classList.add("active-kb");
     const osc = new Tone.Oscillator(note, oscRef.current.type);
@@ -81,7 +119,7 @@ export default function Synth() {
     ).start();
     lfoMod.connect(osc.frequency);
     osc.chain(env, volume, analyserFftRef.current, analyserWaveformRef.current);
-    voiceRef.current.set(note, { osc, env, volume });
+    voiceRef.current.set(note, { osc, env, volume, lfo: lfoMod });
     osc.start();
     env.triggerAttack();
   };
@@ -91,6 +129,31 @@ export default function Synth() {
     keyboardElement?.classList.remove("active-kb");
     const voice = voiceRef.current.get(note);
     voice?.env.triggerRelease();
+    if (!voice) return;
+
+    const releaseDuration = Tone.Time(adsrValueRef.current.release).toSeconds();
+
+    const timeoutId = setTimeout(
+      () => {
+        if (voice.osc.disposed) return;
+        voice.osc.disconnect();
+        voice.env.disconnect();
+        voice.volume.disconnect();
+        voice.lfo.disconnect();
+
+        voice.osc.dispose();
+        voice.env.dispose();
+        voice.volume.dispose();
+        voice.lfo.dispose();
+
+        const currentVoice = voiceRef.current.get(note);
+        if (currentVoice === voice) {
+          voiceRef.current.delete(note);
+        }
+      },
+      releaseDuration * 1000 + 100,
+    );
+    voice.timeoutId = timeoutId;
   };
 
   useEffect(() => {
@@ -121,10 +184,6 @@ export default function Synth() {
       if (e.repeat) return;
       const key = e.code;
       const note = KEY_MAP[key];
-      if (voiceRef.current.has(note)) {
-        const voice = voiceRef.current.get(note);
-        voice?.env.dispose();
-      }
       creatSound(note);
     };
 
